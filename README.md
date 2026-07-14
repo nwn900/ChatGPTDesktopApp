@@ -1,53 +1,51 @@
 # ChatGPT Desktop
 
-A native Windows desktop application for ChatGPT built with Tauri 2.
+A native Windows desktop application for [ChatGPT](https://chatgpt.com/), built with [Tauri 2](https://v2.tauri.app/). Runs as a standalone WebView2 window with system tray integration.
+
+![ChatGPT Desktop](icon.png)
 
 ## Features
 
-- Direct access to ChatGPT
-- Native Windows application
-- System tray with minimize-to-tray
-- Launch at system startup option
-- Multiple login methods (Google, Apple, Microsoft SSO)
-- Single instance enforcement
+- **Native window** — dedicated Chrome-based WebView2 for ChatGPT, not a browser tab
+- **System tray** — minimize to tray, left-click to restore, right-click for menu
+- **Minimize-on-close** — closing hides to tray instead of quitting
+- **Launch at startup** — optional toggle in tray menu
+- **Single instance** — prevents duplicate windows
+- **Login in-app** — Google, Apple, and Microsoft SSO are handled directly inside the native window (no external browser redirect)
+- **No telemetry** — no tracking, no analytics, no bloat
 
-## Screenshots
+## Downloads
 
-*(Coming soon)*
+Pre-built binaries are available on the [Releases](https://github.com/nwn900/ChatGPTDesktopApp/releases) page:
 
-## Prerequisites
+| Package | File |
+|---|---|
+| Installer (NSIS) | `ChatGPT_1.0.0_x64-setup.exe` |
+| Portable EXE | `chatgpt-desktop-app.exe` |
 
-- **Rust** (latest stable) — download from [rustup.rs](https://rustup.rs/)
-- **Node.js** (v18 or later) — download from [nodejs.org](https://nodejs.org/)
-- **WebView2** — pre-installed on Windows 10 and later
+## Prerequisites (Building from Source)
 
-## Building from Source
+- [Rust](https://rustup.rs/) (latest stable)
+- [Node.js](https://nodejs.org/) (v18+)
+- [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) — pre-installed on Windows 10 and later
 
-1. Clone the repository:
-   ```
-   git clone https://github.com/nwn900/ChatGPTDesktopApp.git
-   ```
-2. Navigate to the Tauri backend:
-   ```
-   cd src-tauri
-   ```
-3. Build the application:
-   ```
-   cargo tauri build
-   ```
+## Build from Source
 
-The compiled binary will be placed in `src-tauri/target/release/`.
+```sh
+git clone https://github.com/nwn900/ChatGPTDesktopApp.git
+cd ChatGPTDesktopApp/src-tauri
+cargo tauri build
+```
 
-## Contributing
+Output goes to `src-tauri/target/release/`.
 
-Contributions are welcome. Submit a Pull Request.
+## Usage
+
+- **Left-click** tray icon → show/focus window
+- **Right-click** tray icon → menu: Open, Login, autostart toggle, Close
+- **Login...** → navigates the native window to `chatgpt.com` for in-app authentication
+- **Close** → quits the application entirely
 
 ## License
 
 ISC
-
-## Acknowledgments
-
-- [Tauri](https://tauri.app/)
-- [OpenAI](https://openai.com/)
-- [ChatGPT](https://chatgpt.com/)

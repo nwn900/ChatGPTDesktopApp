@@ -103,9 +103,7 @@ fn main() {
             "#)
             .inner_size(1200.0, 900.0)
             .resizable(true)
-            .on_navigation(|url| {
-                is_allowed_url(url)
-            })
+            .on_navigation(|url| is_allowed_url(url))
             .build()?;
 
             // If autostart is enabled, launch minimized to tray
@@ -130,7 +128,9 @@ fn main() {
             // Build system tray menu
             let is_enabled = app.autolaunch().is_enabled().unwrap_or(false);
 
+            let separator = PredefinedMenuItem::separator(app)?;
             let open_item = MenuItem::with_id(app, "open", "Open ChatGPT", true, None::<&str>)?;
+            let login_item = MenuItem::with_id(app, "login", "Login...", true, None::<&str>)?;
             let startup_item = CheckMenuItem::with_id(
                 app,
                 "startup",
@@ -139,10 +139,12 @@ fn main() {
                 is_enabled,
                 None::<&str>,
             )?;
-            let separator = PredefinedMenuItem::separator(app)?;
             let close_item = MenuItem::with_id(app, "close", "Close ChatGPT", true, None::<&str>)?;
 
-            let menu = Menu::with_items(app, &[&open_item, &startup_item, &separator, &close_item])?;
+            let menu = Menu::with_items(
+                app,
+                &[&open_item, &login_item, &separator, &startup_item, &separator, &close_item],
+            )?;
 
             let _tray = TrayIconBuilder::new()
                 .icon(app.default_window_icon().cloned().unwrap())
@@ -154,6 +156,15 @@ fn main() {
                             if let Some(window) = app_handle.get_webview_window("main") {
                                 let _ = window.show();
                                 let _ = window.set_focus();
+                            }
+                        }
+                        "login" => {
+                            if let Some(window) = app_handle.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                                if let Ok(url) = url::Url::parse(TARGET_URL) {
+                                    let _ = window.navigate(url);
+                                }
                             }
                         }
                         "startup" => {

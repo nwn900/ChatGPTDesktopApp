@@ -8,3 +8,19 @@ src-tauri/target/
 *~
 .DS_Store
 Thumbs.db
+
+# Agent config
+.omo/
+.opencode/
+
+# Cookie popup dead code
+frontend/popup/
+
+# Generated icon build artifacts
+icon-square.png
+src-tauri/icons/64x64.png
+src-tauri/icons/Square*.png
+src-tauri/icons/StoreLogo.png
+src-tauri/icons/icon.icns
+src-tauri/icons/android/
+src-tauri/icons/ios/
