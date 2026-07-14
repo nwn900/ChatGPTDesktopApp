@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    webview::DownloadEvent, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_autostart::ManagerExt;
 
@@ -104,6 +104,35 @@ fn main() {
             .inner_size(1200.0, 900.0)
             .resizable(true)
             .on_navigation(|url| is_allowed_url(url))
+            .on_download(|_webview, event| {
+                match event {
+                    DownloadEvent::Requested { destination, .. } => {
+                        // ponytail: wry pre-fills `destination` with WebView2's
+                        // suggested name+ext (from the blob's `download` attr /
+                        // Content-Disposition) via ResultFilePath(). Use that as
+                        // the save-dialog default instead of the blob URL, which
+                        // carries no filename. Avoids a second raw CoreWebView2
+                        // DownloadStarting handler (would clash with wry's).
+                        let filename = destination
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("download")
+                            .to_string();
+                        let mut dlg = rfd::FileDialog::new().set_file_name(&filename);
+                        if let Some(dir) = destination.parent() {
+                            dlg = dlg.set_directory(dir);
+                        }
+                        if let Some(path) = dlg.save_file() {
+                            *destination = path;
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    DownloadEvent::Finished { .. } => true,
+                    _ => true,
+                }
+            })
             .build()?;
 
             // If autostart is enabled, launch minimized to tray

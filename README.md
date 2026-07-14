@@ -20,7 +20,7 @@ Pre-built binaries are available on the [Releases](https://github.com/nwn900/Cha
 
 | Package | File |
 |---|---|
-| Installer (NSIS) | `ChatGPT_1.0.0_x64-setup.exe` |
+| Installer (NSIS) | `ChatGPT_1.0.1_x64-setup.exe` |
 | Portable EXE | `chatgpt-desktop-app.exe` |
 
 ## Prerequisites (Building from Source)
