@@ -103,6 +103,13 @@ fn main() {
             "#)
             .inner_size(1200.0, 900.0)
             .resizable(true)
+            // ponytail: Tauri enables wry's drag-drop handler by default, which
+            // registers IDropTarget on the WebView2 HWND and calls
+            // SetAllowExternalDrop(false). This intercepts OS file drops before
+            // they reach the page. Disabling it lets WebView2 forward drops to
+            // the page as native HTML5 drag-drop events (dragenter/dragover/drop
+            // with dataTransfer.files) — which ChatGPT already handles.
+            .disable_drag_drop_handler()
             .on_navigation(|url| is_allowed_url(url))
             .on_download(|_webview, event| {
                 match event {
