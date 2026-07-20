@@ -110,7 +110,15 @@ fn main() {
             // the page as native HTML5 drag-drop events (dragenter/dragover/drop
             // with dataTransfer.files) — which ChatGPT already handles.
             .disable_drag_drop_handler()
-            .on_navigation(|url| is_allowed_url(url))
+            .on_navigation(|url| {
+                if is_allowed_url(url) {
+                    return true;
+                }
+                // ponytail: block navigation in webview for external links,
+                // open them in the default system browser instead.
+                let _ = open::that_detached(url.as_str());
+                false
+            })
             .on_download(|_webview, event| {
                 match event {
                     DownloadEvent::Requested { destination, .. } => {
