@@ -5,7 +5,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    webview::DownloadEvent, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
+    webview::DownloadEvent,
+    Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 use tauri_plugin_autostart::ManagerExt;
 
@@ -174,6 +175,7 @@ fn main() {
 
             let separator = PredefinedMenuItem::separator(app)?;
             let open_item = MenuItem::with_id(app, "open", "Open ChatGPT", true, None::<&str>)?;
+            let refresh_item = MenuItem::with_id(app, "refresh", "Refresh ChatGPT", true, None::<&str>)?;
             let login_item = MenuItem::with_id(app, "login", "Login...", true, None::<&str>)?;
             let startup_item = CheckMenuItem::with_id(
                 app,
@@ -187,7 +189,7 @@ fn main() {
 
             let menu = Menu::with_items(
                 app,
-                &[&open_item, &login_item, &separator, &startup_item, &separator, &close_item],
+                &[&open_item, &refresh_item, &login_item, &separator, &startup_item, &separator, &close_item],
             )?;
 
             let _tray = TrayIconBuilder::new()
@@ -200,6 +202,13 @@ fn main() {
                             if let Some(window) = app_handle.get_webview_window("main") {
                                 let _ = window.show();
                                 let _ = window.set_focus();
+                            }
+                        }
+                        "refresh" => {
+                            if let Some(window) = app_handle.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                                let _ = window.eval("window.location.reload();");
                             }
                         }
                         "login" => {
