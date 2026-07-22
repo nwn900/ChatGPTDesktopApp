@@ -111,6 +111,11 @@ fn main() {
             // the page as native HTML5 drag-drop events (dragenter/dragover/drop
             // with dataTransfer.files) — which ChatGPT already handles.
             .disable_drag_drop_handler()
+            // ponytail: disable overlay scrollbar flash timeout. When overlay
+            // scrollbars auto-hide, WebView2/Chromium can stop routing wheel
+            // events to the page, causing scroll to freeze until manual click.
+            // Disabling the timeout keeps the scroll path active.
+            .additional_browser_args("--disable-features=OverlayScrollbarFlashAfterAnyScrollUpdate")
             .on_navigation(|url| {
                 if is_allowed_url(url) {
                     return true;
@@ -165,6 +170,16 @@ fn main() {
                             api.prevent_close();
                             let _ = win_clone.hide();
                         }
+                    }
+                    WindowEvent::Focused(true) => {
+                        // ponytail: WebView2/Chromium can lose scroll routing
+                        // after focus transitions (WebView2Feedback#829).
+                        // Re-focus the page's main scroll container to restore
+                        // wheel event delivery. ChatGPT uses a div with
+                        // role="main" as its scroll root.
+                        let _ = win_clone.eval(
+                            "document.querySelector('[role=\\\\\"main\\\\\"]')?.focus({preventScroll:true});",
+                        );
                     }
                     _ => {}
                 }

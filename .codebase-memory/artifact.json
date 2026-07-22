@@ -1,0 +1,11 @@
+{
+    "schema_version": 2,
+    "commit": "a920baac4c18827da9870e72d35a801fe224465e",
+    "indexed_at": "2026-07-21T18:32:17Z",
+    "project": "chatgpt-web-app",
+    "nodes": 99,
+    "edges": 117,
+    "original_size": 1900544,
+    "compressed_size": 54132,
+    "compression_level": 3
+}
