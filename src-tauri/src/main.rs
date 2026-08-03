@@ -127,9 +127,6 @@ fn main() {
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0")
             .initialization_script(r#"
                 Object.defineProperty(navigator, 'webdriver', { get: () => false });
-                if (window.chrome && window.chrome.webview) {
-                    delete window.chrome.webview;
-                }
                 window.open = function(url, name, features) {
                     if (url) { window.location.assign(url); }
                     return { close: function(){}, focus: function(){} };
@@ -166,6 +163,7 @@ fn main() {
                         // only when the user isn't looking at the app
                         if (document.hasFocus()) return;
                         if (Date.now() - lastNotified < 8000) return;
+                        if (!window.__TAURI__ || !window.__TAURI__.core) return;
                         var msgs = document.querySelectorAll(MSG);
                         if (!msgs.length) return;
                         lastNotified = Date.now();

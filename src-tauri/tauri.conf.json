@@ -1,13 +1,14 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicegui-org/nicegui/refs/heads/main/nicegui/static/tauri.schema.json",
   "productName": "ChatGPT",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "identifier": "com.chatgpt.desktop",
   "build": {
     "frontendDist": "../frontend",
     "devUrl": "https://chatgpt.com"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [],
     "security": {
       "dangerousDisableAssetCspModification": true,
