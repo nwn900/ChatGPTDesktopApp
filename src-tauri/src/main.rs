@@ -10,17 +10,23 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt;
 
-/// Fire a system-wide toast. Invoked from the injected watcher on
-/// chatgpt.com once a streaming answer finishes.
+/// Fire a system-wide toast.
+fn send_toast(app: &tauri::AppHandle, title: &str, body: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app
+        .notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show();
+}
+
+/// Invoked from the injected watcher on chatgpt.com once a streaming
+/// answer finishes.
 #[tauri::command]
 fn notify_answer(app: tauri::AppHandle, title: String, body: String) -> Result<(), String> {
-    use tauri_plugin_notification::NotificationExt;
-    app.notification()
-        .builder()
-        .title(&title)
-        .body(&body)
-        .show()
-        .map_err(|e| e.to_string())
+    send_toast(&app, &title, &body);
+    Ok(())
 }
 
 static IS_QUITTING: AtomicBool = AtomicBool::new(false);
@@ -116,29 +122,50 @@ fn main() {
                         }, 2000);
                     }
                 });
-                // ponytail: poll for the stop button — it is present only while
-                // ChatGPT is streaming a response. When it disappears after a
-                // stream, a toast is fired (only when the window is unfocused,
-                // so a focused user watching the answer isn't spammed).
+                // ponytail: notify when ChatGPT finishes answering. Primary
+                // signal: stop button present only while streaming, then gone.
+                // Fallback (DOM-version-proof): the last assistant message's
+                // text grows while generating; 3 stable ticks with no stop
+                // button = done. Notifies on every completion (no focus gate).
                 (function() {
-                    var STOP = 'button[data-testid="stop-button"], button[aria-label*="Stop generating"], button[aria-label*="Stop streaming"]';
-                    var MSG = '[data-message-author-role="assistant"][data-message-id]';
+                    var STOP = 'button[data-testid="stop-button"], button[aria-label*="Stop generating"], button[aria-label*="Stop streaming"], button[aria-label*="Stop response"]';
+                    var MSG = '[data-message-author-role="assistant"]';
                     var streaming = false;
+                    var lastText = null;
+                    var stableTicks = 0;
                     var lastNotified = 0;
+                    function notify() {
+                        // only when the user isn't looking at the app
+                        if (document.hasFocus()) return;
+                        if (Date.now() - lastNotified < 8000) return;
+                        var msgs = document.querySelectorAll(MSG);
+                        if (!msgs.length) return;
+                        lastNotified = Date.now();
+                        var text = (msgs[msgs.length - 1].innerText || '').trim().slice(0, 300);
+                        window.__TAURI__.core.invoke('notify_answer', {
+                            title: 'ChatGPT',
+                            body: text || 'Your question has been answered.'
+                        }).catch(function() {});
+                    }
                     setInterval(function() {
                         var nowStreaming = !!document.querySelector(STOP);
-                        if (streaming && !nowStreaming && !document.hasFocus() && Date.now() - lastNotified > 8000) {
-                            var msgs = document.querySelectorAll(MSG);
-                            if (msgs.length) {
-                                lastNotified = Date.now();
-                                var text = (msgs[msgs.length - 1].innerText || '').trim().slice(0, 300);
-                                window.__TAURI__.core.invoke('notify_answer', {
-                                    title: 'ChatGPT',
-                                    body: text || 'Your question has been answered.'
-                                }).catch(function() {});
-                            }
+                        var msgs = document.querySelectorAll(MSG);
+                        var last = msgs.length ? msgs[msgs.length - 1] : null;
+                        var t = last ? (last.innerText || '').trim() : '';
+
+                        if (streaming && !nowStreaming) {
+                            notify();
+                            streaming = false;
                         }
-                        streaming = nowStreaming;
+                        if (lastText !== null && t.length > lastText.length) {
+                            streaming = true;
+                            stableTicks = 0;
+                        } else if (streaming && t === lastText && stableTicks < 3) {
+                            stableTicks++;
+                            // fallback: stable text + no stop button = done
+                            if (stableTicks >= 3 && !nowStreaming) notify();
+                        }
+                        lastText = t;
                     }, 1000);
                 })();
             "#)
@@ -231,6 +258,7 @@ fn main() {
             let separator = PredefinedMenuItem::separator(app)?;
             let open_item = MenuItem::with_id(app, "open", "Open ChatGPT", true, None::<&str>)?;
             let refresh_item = MenuItem::with_id(app, "refresh", "Refresh ChatGPT", true, None::<&str>)?;
+            let test_notif_item = MenuItem::with_id(app, "test-notif", "Test Notification", true, None::<&str>)?;
             let login_item = MenuItem::with_id(app, "login", "Login...", true, None::<&str>)?;
             let startup_item = CheckMenuItem::with_id(
                 app,
@@ -244,7 +272,7 @@ fn main() {
 
             let menu = Menu::with_items(
                 app,
-                &[&open_item, &refresh_item, &login_item, &separator, &startup_item, &separator, &close_item],
+                &[&open_item, &refresh_item, &test_notif_item, &login_item, &separator, &startup_item, &separator, &close_item],
             )?;
 
             let _tray = TrayIconBuilder::new()
@@ -265,6 +293,13 @@ fn main() {
                                 let _ = window.set_focus();
                                 let _ = window.eval("window.location.reload();");
                             }
+                        }
+                        "test-notif" => {
+                            send_toast(
+                                app_handle,
+                                "ChatGPT",
+                                "Notifications work — toasts will fire when answers finish.",
+                            );
                         }
                         "login" => {
                             if let Some(window) = app_handle.get_webview_window("main") {
