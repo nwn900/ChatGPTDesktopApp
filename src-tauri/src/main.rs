@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
@@ -10,21 +11,46 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt;
 
+/// Append one line to <app-log-dir>/notifications.log — remote diagnostics:
+/// proves the JS watcher -> invoke -> Rust path fired, and whether the
+/// toast itself succeeded.
+fn log_event(app: &tauri::AppHandle, msg: &str) {
+    let Ok(dir) = app.path().app_log_dir() else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("notifications.log");
+    let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) else {
+        return;
+    };
+    use std::io::Write;
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let _ = writeln!(f, "[{secs}] {msg}");
+}
+
 /// Fire a system-wide toast.
 fn send_toast(app: &tauri::AppHandle, title: &str, body: &str) {
     use tauri_plugin_notification::NotificationExt;
-    let _ = app
+    match app
         .notification()
         .builder()
         .title(title)
         .body(body)
-        .show();
+        .show()
+    {
+        Ok(_) => log_event(app, &format!("toast OK: {title}")),
+        Err(e) => log_event(app, &format!("toast FAIL: {title}: {e}")),
+    }
 }
 
 /// Invoked from the injected watcher on chatgpt.com once a streaming
 /// answer finishes.
 #[tauri::command]
 fn notify_answer(app: tauri::AppHandle, title: String, body: String) -> Result<(), String> {
+    log_event(&app, &format!("watcher fired: {title}"));
     send_toast(&app, &title, &body);
     Ok(())
 }
@@ -122,13 +148,15 @@ fn main() {
                         }, 2000);
                     }
                 });
-                // ponytail: notify when ChatGPT finishes answering. Primary
-                // signal: stop button present only while streaming, then gone.
+                // ponytail: notify when ChatGPT finishes answering or pauses
+                // waiting for the user (approval/continue). Primary signal:
+                // stop button present only while streaming, then gone. 
                 // Fallback (DOM-version-proof): the last assistant message's
                 // text grows while generating; 3 stable ticks with no stop
-                // button = done. Notifies on every completion (no focus gate).
+                // button = done. Fires only when the window is not focused.
                 (function() {
                     var STOP = 'button[data-testid="stop-button"], button[aria-label*="Stop generating"], button[aria-label*="Stop streaming"], button[aria-label*="Stop response"]';
+                    var NEEDS = 'button[data-testid="continue-generating-button"], button[aria-label*="Continue generating"]';
                     var MSG = '[data-message-author-role="assistant"]';
                     var streaming = false;
                     var lastText = null;
@@ -149,13 +177,16 @@ fn main() {
                     }
                     setInterval(function() {
                         var nowStreaming = !!document.querySelector(STOP);
+                        var needsUser = !!document.querySelector(NEEDS);
                         var msgs = document.querySelectorAll(MSG);
                         var last = msgs.length ? msgs[msgs.length - 1] : null;
                         var t = last ? (last.innerText || '').trim() : '';
 
                         if (streaming && !nowStreaming) {
-                            notify();
+                            notify();   // stream finished (answer or approval wait)
                             streaming = false;
+                        } else if (needsUser) {
+                            notify();   // paused waiting for an action
                         }
                         if (lastText !== null && t.length > lastText.length) {
                             streaming = true;
@@ -182,7 +213,10 @@ fn main() {
             // scrollbars auto-hide, WebView2/Chromium can stop routing wheel
             // events to the page, causing scroll to freeze until manual click.
             // Disabling the timeout keeps the scroll path active.
-            .additional_browser_args("--disable-features=OverlayScrollbarFlashAfterAnyScrollUpdate")
+            // Also disable background timer throttling: when the window is
+            // minimized/hidden, Chromium clamps setInterval to ~1/min, which
+            // starved the answer-completion watcher below.
+            .additional_browser_args("--disable-features=OverlayScrollbarFlashAfterAnyScrollUpdate --disable-background-timer-throttling --disable-renderer-backgrounding")
             .on_navigation(|url| {
                 if is_allowed_url(url) {
                     return true;
