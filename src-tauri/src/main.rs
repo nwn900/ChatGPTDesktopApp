@@ -10,6 +10,19 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt;
 
+/// Fire a system-wide toast. Invoked from the injected watcher on
+/// chatgpt.com once a streaming answer finishes.
+#[tauri::command]
+fn notify_answer(app: tauri::AppHandle, title: String, body: String) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    app.notification()
+        .builder()
+        .title(&title)
+        .body(&body)
+        .show()
+        .map_err(|e| e.to_string())
+}
+
 static IS_QUITTING: AtomicBool = AtomicBool::new(false);
 
 const TARGET_URL: &str = "https://chatgpt.com";
@@ -58,6 +71,7 @@ fn is_allowed_url(url: &url::Url) -> bool {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -68,6 +82,7 @@ fn main() {
                 let _ = window.set_focus();
             }
         }))
+        .invoke_handler(tauri::generate_handler![notify_answer])
         .setup(|app| {
             let target_url: url::Url = TARGET_URL.parse().unwrap();
 
@@ -101,6 +116,31 @@ fn main() {
                         }, 2000);
                     }
                 });
+                // ponytail: poll for the stop button — it is present only while
+                // ChatGPT is streaming a response. When it disappears after a
+                // stream, a toast is fired (only when the window is unfocused,
+                // so a focused user watching the answer isn't spammed).
+                (function() {
+                    var STOP = 'button[data-testid="stop-button"], button[aria-label*="Stop generating"], button[aria-label*="Stop streaming"]';
+                    var MSG = '[data-message-author-role="assistant"][data-message-id]';
+                    var streaming = false;
+                    var lastNotified = 0;
+                    setInterval(function() {
+                        var nowStreaming = !!document.querySelector(STOP);
+                        if (streaming && !nowStreaming && !document.hasFocus() && Date.now() - lastNotified > 8000) {
+                            var msgs = document.querySelectorAll(MSG);
+                            if (msgs.length) {
+                                lastNotified = Date.now();
+                                var text = (msgs[msgs.length - 1].innerText || '').trim().slice(0, 300);
+                                window.__TAURI__.core.invoke('notify_answer', {
+                                    title: 'ChatGPT',
+                                    body: text || 'Your question has been answered.'
+                                }).catch(function() {});
+                            }
+                        }
+                        streaming = nowStreaming;
+                    }, 1000);
+                })();
             "#)
             .inner_size(1200.0, 900.0)
             .resizable(true)
