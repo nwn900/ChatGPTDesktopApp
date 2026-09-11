@@ -1,6 +1,6 @@
 [package]
 name = "chatgpt-desktop-app"
-version = "1.0.10"
+version = "1.0.11"
 description = "A native Windows desktop application for ChatGPT"
 authors = ["nwn900"]
 license = "ISC"
@@ -10,7 +10,8 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri-winrt-notification = "0.7.3"
+tauri = { version = "2.11", features = ["tray-icon"] }
 tauri-plugin-shell = "2"
 tauri-plugin-autostart = { version = "2", features = [] }
 tauri-plugin-single-instance = "2"

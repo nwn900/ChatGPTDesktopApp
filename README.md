@@ -1,51 +1,39 @@
 # ChatGPT Desktop
 
-A native Windows desktop application for [ChatGPT](https://chatgpt.com/), built with [Tauri 2](https://v2.tauri.app/). Runs as a standalone WebView2 window with system tray integration.
+A Windows desktop app for ChatGPT, built with Rust, Tauri 2 and Microsoft Edge WebView2.
 
-![ChatGPT Desktop](icon.png)
-
-## Features
-
-- **Native window** — dedicated Chrome-based WebView2 for ChatGPT, not a browser tab
-- **System tray** — minimize to tray, left-click to restore, right-click for menu
-- **Minimize-on-close** — closing hides to tray instead of quitting
-- **Launch at startup** — optional toggle in tray menu
-- **Single instance** — prevents duplicate windows
-- **Login in-app** — Google, Apple, and Microsoft SSO are handled directly inside the native window (no external browser redirect)
-- **No telemetry** — no tracking, no analytics, no bloat
+![ChatGPT](icon.png)
 
 ## Downloads
 
-Pre-built binaries are available on the [Releases](https://github.com/nwn900/ChatGPTDesktopApp/releases) page:
+[Download v1.0.11](https://github.com/nwn900/ChatGPTDesktopApp/releases/tag/v1.0.11) — Windows x64 NSIS installer, compiled locally.
 
-| Package | File |
-|---|---|
-| Installer (NSIS) | `ChatGPT_1.0.10_x64-setup.exe` |
-| Portable EXE | `chatgpt-desktop-app.exe` |
+## Features
 
-## Prerequisites (Building from Source)
+- System tray, single instance, and hide on close.
+- Manual launch opens the window; Windows startup uses the explicit `--autostart` argument.
+- Answer-completion notifications while the main window is inactive. Click a notification to restore the app; use Test Notification in the tray menu to check Windows delivery.
+- Native authentication popups and file-download dialogs.
+- Transparent application icon.
 
-- [Rust](https://rustup.rs/) (latest stable)
-- [Node.js](https://nodejs.org/) (v18+)
-- [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) — pre-installed on Windows 10 and later
+Completion detection observes page mutations and reads text without forcing layout. It does not continually scan an idle page. Selectors live in `src-tauri/src/notifications.js`; service redesigns can require selector updates. Native delivery status is recorded in a bounded `notifications.log` under the application's log directory.
 
-## Build from Source
+## Build locally
 
-```sh
-git clone https://github.com/nwn900/ChatGPTDesktopApp.git
-cd ChatGPTDesktopApp/src-tauri
-cargo tauri build
+Install Rust's MSVC toolchain, Visual Studio C++ Build Tools, WebView2, and the Tauri CLI (`cargo install tauri-cli --locked`). Use a Visual Studio developer shell with `CC=cl.exe` and `CXX=cl.exe`.
+
+```powershell
+cd src-tauri
+cargo test --locked
+cargo tauri build -- --locked
 ```
 
-Output goes to `src-tauri/target/release/`.
+The installer is generated in `target/release/bundle/nsis/`. To limit disk usage, set `CARGO_TARGET_DIR` to a dedicated directory on a drive with free space, set `CARGO_INCREMENTAL=0`, and build one app at a time. Copy completed installers outside the target directory before running `cargo clean`.
 
-## Usage
+Run JavaScript regression tests with `node --test tests/notifications.test.cjs`.
 
-- **Left-click** tray icon → show/focus window
-- **Right-click** tray icon → menu: Open, Login, autostart toggle, Close
-- **Login...** → navigates the native window to `chatgpt.com` for in-app authentication
-- **Close** → quits the application entirely
+Releases are uploaded from local builds. Tag pushes do not run a GitHub installer build.
 
-## License
+## Verification limits
 
-ISC
+Automated tests cover wrapper logic and simulated page signals. Signed-in provider flows, real response completion, Windows notification visibility, and rendering timings require live verification. Windows notification settings and Do Not Disturb can suppress visible banners.
