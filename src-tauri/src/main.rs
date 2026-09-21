@@ -10,50 +10,129 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt;
 
+mod links;
+mod logging;
 mod notifications;
 
 static IS_QUITTING: AtomicBool = AtomicBool::new(false);
 
 const TARGET_URL: &str = "https://chatgpt.com";
 
-const ALLOWED_HOSTS: &[&str] = &[
-    "chatgpt.com",
-    "openai.com",
-    "chat.openai.com",
-    "auth.openai.com",
-    "accounts.google.com",
-    "google.com",
-    "googleusercontent.com",
-    "gstatic.com",
-    "googleapis.com",
-    "apple.com",
-    "appleid.apple.com",
-    "recaptcha.net",
-    "microsoftonline.com",
-    "live.com",
-    "microsoft.com",
-    "stripe.com",
-];
+pub(crate) fn build_main_window(
+    app_handle: &tauri::AppHandle,
+) -> tauri::Result<tauri::WebviewWindow> {
+    let popup_app = app_handle.clone();
+    let browser_app = app_handle.clone();
+    let navigation_app = app_handle.clone();
+    let target_url: url::Url = TARGET_URL.parse().unwrap();
+    // The page itself decides which clicks leave the app. The host list is
+    // injected here so the policy has a single source of truth in links.rs.
+    let in_app_hosts = format!(
+        "window.__CHATGPT_IN_APP_HOSTS = {};",
+        serde_json::to_string(links::IN_APP_HOSTS).unwrap_or_else(|_| "[]".to_string())
+    );
 
-fn is_allowed_host(hostname: &str) -> bool {
-    ALLOWED_HOSTS
-        .iter()
-        .any(|suffix| hostname == *suffix || hostname.ends_with(&format!(".{}", suffix)))
+    WebviewWindowBuilder::new(app_handle, "main", WebviewUrl::External(target_url))
+        .title("ChatGPT")
+        .initialization_script(&in_app_hosts)
+        .initialization_script(include_str!("links.js"))
+        .initialization_script(include_str!("notifications.js"))
+        .on_new_window(move |url, features| {
+            if !links::is_allowed_url(&url) {
+                // ponytail: a link the app does not own belongs to the user
+                // default browser, never to an in-app window.
+                if matches!(url.scheme(), "http" | "https" | "mailto") {
+                    let _ = links::open_in_default_browser(&browser_app, url.as_str());
+                }
+                return NewWindowResponse::Deny;
+            }
+            static POPUP_ID: std::sync::atomic::AtomicUsize =
+                std::sync::atomic::AtomicUsize::new(1);
+            let label = format!("login-{}", POPUP_ID.fetch_add(1, Ordering::Relaxed));
+            match WebviewWindowBuilder::new(
+                &popup_app,
+                label,
+                WebviewUrl::External("about:blank".parse().unwrap()),
+            )
+            .window_features(features)
+            .on_navigation(|url| links::is_allowed_url(url))
+            .build()
+            {
+                Ok(window) => NewWindowResponse::Create { window },
+                Err(_) => NewWindowResponse::Deny,
+            }
+        })
+        .inner_size(1200.0, 900.0)
+        .resizable(true)
+        .visible(true)
+        .center()
+        .focused(true)
+        // ponytail: Tauri enables wry drag-drop handler by default, which
+        // registers IDropTarget on the WebView2 HWND and calls
+        // SetAllowExternalDrop(false). This intercepts OS file drops before
+        // they reach the page. Disabling it lets WebView2 forward drops to
+        // the page as native HTML5 drag-drop events (dragenter/dragover/drop
+        // with dataTransfer.files) which ChatGPT already handles.
+        .disable_drag_drop_handler()
+        // ponytail: keep the scroll path and the page timers alive. When the
+        // window is minimized or hidden, Chromium clamps timers to about one
+        // tick per minute, which starved the answer-completion watcher.
+        .additional_browser_args("--disable-background-timer-throttling")
+        .on_navigation(move |url| {
+            if links::is_allowed_url(url) {
+                return true;
+            }
+            // ponytail: a click that somehow skipped the page interceptor must
+            // still not replace the ChatGPT window with a foreign page.
+            if matches!(url.scheme(), "https" | "http" | "mailto") {
+                let _ = links::open_in_default_browser(&navigation_app, url.as_str());
+            }
+            false
+        })
+        .on_download(|_webview, event| {
+            match event {
+                DownloadEvent::Requested { destination, .. } => {
+                    // ponytail: wry pre-fills destination with WebView2
+                    // suggested name+ext (from the blob download attr or
+                    // Content-Disposition) via ResultFilePath(). Use that as
+                    // the save-dialog default instead of the blob URL, which
+                    // carries no filename. Avoids a second raw CoreWebView2
+                    // DownloadStarting handler (would clash with wry).
+                    let filename = destination
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("download")
+                        .to_string();
+                    let mut dlg = rfd::FileDialog::new().set_file_name(&filename);
+                    if let Some(dir) = destination.parent() {
+                        dlg = dlg.set_directory(dir);
+                    }
+                    if let Some(path) = dlg.save_file() {
+                        *destination = path;
+                        true
+                    } else {
+                        false
+                    }
+                }
+                DownloadEvent::Finished { .. } => true,
+                _ => true,
+            }
+        })
+        .build()
 }
 
-fn is_allowed_url(url: &url::Url) -> bool {
-    match url.scheme() {
-        "http" | "https" => url.host_str().is_some_and(is_allowed_host),
-        "about" => url.path() == "blank",
-        "blob" => url
-            .path()
-            .split_once(':')
-            .and_then(|(scheme, rest)| match scheme {
-                "http" | "https" => url::Url::parse(&format!("{scheme}:{rest}")).ok(),
-                _ => None,
-            })
-            .is_some_and(|inner_url| inner_url.host_str().is_some_and(is_allowed_host)),
-        _ => false,
+pub(crate) fn show_main_window(app_handle: &tauri::AppHandle) {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return;
+    }
+    // ponytail: tray-only trap — main window gone, rebuild it
+    if let Ok(window) = build_main_window(app_handle) {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
     }
 }
 
@@ -66,106 +145,23 @@ fn main() {
             Some(vec!["--autostart"]),
         ))
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
+            show_main_window(app);
         }))
-        .invoke_handler(tauri::generate_handler![notifications::notify_answer])
+        .invoke_handler(tauri::generate_handler![
+            notifications::notify_answer,
+            links::open_external
+        ])
         .setup(|app| {
-            let popup_app = app.handle().clone();
-            let target_url: url::Url = TARGET_URL.parse().unwrap();
-
-            let main_window =
-                WebviewWindowBuilder::new(app, "main", WebviewUrl::External(target_url))
-                    .title("ChatGPT")
-                    .initialization_script(include_str!("notifications.js"))
-                    .on_new_window(move |url, features| {
-                        if !is_allowed_url(&url) {
-                            if matches!(url.scheme(), "http" | "https") {
-                                let _ = open::that_detached(url.as_str());
-                            }
-                            return NewWindowResponse::Deny;
-                        }
-                        static POPUP_ID: std::sync::atomic::AtomicUsize =
-                            std::sync::atomic::AtomicUsize::new(1);
-                        let label = format!("login-{}", POPUP_ID.fetch_add(1, Ordering::Relaxed));
-                        match WebviewWindowBuilder::new(
-                            &popup_app,
-                            label,
-                            WebviewUrl::External("about:blank".parse().unwrap()),
-                        )
-                        .window_features(features)
-                        .on_navigation(|url| is_allowed_url(url))
-                        .build()
-                        {
-                            Ok(window) => NewWindowResponse::Create { window },
-                            Err(_) => NewWindowResponse::Deny,
-                        }
-                    })
-                    .inner_size(1200.0, 900.0)
-                    .resizable(true)
-                    // ponytail: Tauri enables wry's drag-drop handler by default, which
-                    // registers IDropTarget on the WebView2 HWND and calls
-                    // SetAllowExternalDrop(false). This intercepts OS file drops before
-                    // they reach the page. Disabling it lets WebView2 forward drops to
-                    // the page as native HTML5 drag-drop events (dragenter/dragover/drop
-                    // with dataTransfer.files) — which ChatGPT already handles.
-                    .disable_drag_drop_handler()
-                    // ponytail: disable overlay scrollbar flash timeout. When overlay
-                    // scrollbars auto-hide, WebView2/Chromium can stop routing wheel
-                    // events to the page, causing scroll to freeze until manual click.
-                    // Disabling the timeout keeps the scroll path active.
-                    // Also disable background timer throttling: when the window is
-                    // minimized/hidden, Chromium clamps setInterval to ~1/min, which
-                    // starved the answer-completion watcher below.
-                    .additional_browser_args("--disable-background-timer-throttling")
-                    .on_navigation(|url| {
-                        if is_allowed_url(url) {
-                            return true;
-                        }
-                        // ponytail: block navigation in webview for external links,
-                        // open them in the default system browser instead.
-                        if matches!(url.scheme(), "https" | "http" | "mailto") {
-                            let _ = open::that_detached(url.as_str());
-                        }
-                        false
-                    })
-                    .on_download(|_webview, event| {
-                        match event {
-                            DownloadEvent::Requested { destination, .. } => {
-                                // ponytail: wry pre-fills `destination` with WebView2's
-                                // suggested name+ext (from the blob's `download` attr /
-                                // Content-Disposition) via ResultFilePath(). Use that as
-                                // the save-dialog default instead of the blob URL, which
-                                // carries no filename. Avoids a second raw CoreWebView2
-                                // DownloadStarting handler (would clash with wry's).
-                                let filename = destination
-                                    .file_name()
-                                    .and_then(|s| s.to_str())
-                                    .unwrap_or("download")
-                                    .to_string();
-                                let mut dlg = rfd::FileDialog::new().set_file_name(&filename);
-                                if let Some(dir) = destination.parent() {
-                                    dlg = dlg.set_directory(dir);
-                                }
-                                if let Some(path) = dlg.save_file() {
-                                    *destination = path;
-                                    true
-                                } else {
-                                    false
-                                }
-                            }
-                            DownloadEvent::Finished { .. } => true,
-                            _ => true,
-                        }
-                    })
-                    .build()?;
+            let main_window = build_main_window(app.handle())?;
 
             // If autostart is enabled, launch minimized to tray
             if std::env::args().any(|arg| arg == "--autostart") {
                 let _ = main_window.hide();
+            } else {
+                // ponytail: guarantee visible window on manual launch
+                let _ = main_window.show();
+                let _ = main_window.unminimize();
+                let _ = main_window.set_focus();
             }
 
             // Hide to tray on close
@@ -187,8 +183,6 @@ fn main() {
             let open_item = MenuItem::with_id(app, "open", "Open ChatGPT", true, None::<&str>)?;
             let refresh_item =
                 MenuItem::with_id(app, "refresh", "Refresh ChatGPT", true, None::<&str>)?;
-            let test_notif_item =
-                MenuItem::with_id(app, "test-notif", "Test Notification", true, None::<&str>)?;
             let login_item = MenuItem::with_id(app, "login", "Login...", true, None::<&str>)?;
             let startup_item = CheckMenuItem::with_id(
                 app,
@@ -205,7 +199,6 @@ fn main() {
                 &[
                     &open_item,
                     &refresh_item,
-                    &test_notif_item,
                     &login_item,
                     &separator,
                     &startup_item,
@@ -220,29 +213,17 @@ fn main() {
                 .menu(&menu)
                 .on_menu_event(move |app_handle, event| match event.id().as_ref() {
                     "open" => {
-                        if let Some(window) = app_handle.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.unminimize();
-                            let _ = window.set_focus();
-                        }
+                        show_main_window(app_handle);
                     }
                     "refresh" => {
+                        show_main_window(app_handle);
                         if let Some(window) = app_handle.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.unminimize();
-                            let _ = window.set_focus();
                             let _ = window.eval("window.location.reload();");
                         }
                     }
-                    "test-notif" => {
-                        let _ =
-                            notifications::send(app_handle, "Desktop notifications are enabled.");
-                    }
                     "login" => {
+                        show_main_window(app_handle);
                         if let Some(window) = app_handle.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.unminimize();
-                            let _ = window.set_focus();
                             if let Ok(url) = url::Url::parse(TARGET_URL) {
                                 let _ = window.navigate(url);
                             }
@@ -269,12 +250,7 @@ fn main() {
                         button_state: tauri::tray::MouseButtonState::Up,
                         ..
                     } => {
-                        let app = tray.app_handle();
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.unminimize();
-                            let _ = window.set_focus();
-                        }
+                        show_main_window(tray.app_handle());
                     }
                     _ => {}
                 })
@@ -285,38 +261,4 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running ChatGPT");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{is_allowed_host, is_allowed_url};
-
-    #[test]
-    fn allows_common_chatgpt_login_hosts() {
-        assert!(is_allowed_host("chatgpt.com"));
-        assert!(is_allowed_host("auth.openai.com"));
-        assert!(is_allowed_host("chat.openai.com"));
-        assert!(is_allowed_host("accounts.google.com"));
-        assert!(is_allowed_host("auth.example.apple.com"));
-        assert!(is_allowed_host("login.microsoftonline.com"));
-    }
-
-    #[test]
-    fn rejects_unknown_hosts() {
-        assert!(!is_allowed_host("example.com"));
-        assert!(!is_allowed_host("chatgpt.com.example.com"));
-    }
-
-    #[test]
-    fn allows_auth_safe_urls() {
-        let blank: url::Url = "about:blank".parse().unwrap();
-        let blob: url::Url = "blob:https://chatgpt.com/login/callback".parse().unwrap();
-        let app: url::Url = "https://chatgpt.com/?os=app".parse().unwrap();
-        let blocked: url::Url = "https://example.com/login".parse().unwrap();
-
-        assert!(is_allowed_url(&blank));
-        assert!(is_allowed_url(&blob));
-        assert!(is_allowed_url(&app));
-        assert!(!is_allowed_url(&blocked));
-    }
 }

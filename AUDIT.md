@@ -30,3 +30,13 @@ Real provider authentication, streaming responses, notification banner visibilit
 ## Rollback
 
 Previous GitHub release installers remain available. Close the application through its tray menu before reinstalling the prior version if authentication, playback or notification regressions occur. Do not delete the WebView2 user profile. No profile migration or user-data cleanup is part of this release.
+
+## v1.0.12 follow-up
+
+A later follow-up fixed two user-visible defects in the wrapper. It did not repeat the full audit above.
+
+- Link clicks now open the Windows default browser. The page intercepts a click on any link the app does not own and calls a native command; the webview new-window and navigation handlers stay as the fallback for scripted navigation. The keep-in-app host list (ChatGPT origins plus the sign-in providers) lives in `src-tauri/src/links.rs` and is injected into the page, and the native command re-checks the calling origin before launching anything.
+- The Test Notification entry and its toast were removed from the tray menu. Delivery diagnostics are unchanged in `notifications.log`.
+- External launches are appended to a bounded `links.log` beside `notifications.log`, through one shared writer.
+
+Verification for the follow-up: Rust unit tests, simulated-DOM JavaScript tests and a local optimized installer build. A live click inside a signed-in conversation remains a manual check, because provider authentication cannot be automated here.

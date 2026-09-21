@@ -14,11 +14,7 @@ pub fn send(app: &tauri::AppHandle, body: &str) -> Result<(), String> {
             .title("ChatGPT")
             .text1(body)
             .on_activated(move |_| {
-                if let Some(window) = handle.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
+                crate::show_main_window(&handle);
                 Ok(())
             })
             .show()
@@ -33,21 +29,11 @@ pub fn send(app: &tauri::AppHandle, body: &str) -> Result<(), String> {
         .show()
         .map_err(|error| error.to_string());
     // Bounded diagnostic log; never store conversation text.
-    if let Ok(dir) = app.path().app_log_dir() {
-        let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("notifications.log");
-        let append = std::fs::metadata(&path).map_or(true, |m| m.len() < 65_536);
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(append)
-            .truncate(!append)
-            .open(path)
-        {
-            use std::io::Write;
-            let _ = writeln!(file, "Windows notification: {:?}", result);
-        }
-    }
+    crate::logging::append(
+        app,
+        "notifications.log",
+        &format!("Windows notification: {result:?}"),
+    );
     result
 }
 

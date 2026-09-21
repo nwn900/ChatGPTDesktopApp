@@ -1,6 +1,6 @@
 [package]
 name = "chatgpt-desktop-app"
-version = "1.0.11"
+version = "1.0.12"
 description = "A native Windows desktop application for ChatGPT"
 authors = ["nwn900"]
 license = "ISC"
