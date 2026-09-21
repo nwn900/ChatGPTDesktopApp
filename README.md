@@ -6,7 +6,7 @@ A Windows desktop app for ChatGPT, built with Rust, Tauri 2 and Microsoft Edge W
 
 ## Downloads
 
-[Download v1.0.11](https://github.com/nwn900/ChatGPTDesktopApp/releases/tag/v1.0.11) — Windows x64 NSIS installer, compiled locally.
+[Download v1.0.12](https://github.com/nwn900/ChatGPTDesktopApp/releases/tag/v1.0.12) — Windows x64 NSIS installer, compiled locally.
 
 ## Features
 
