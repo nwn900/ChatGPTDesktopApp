@@ -13,6 +13,7 @@ use tauri_plugin_autostart::ManagerExt;
 mod links;
 mod logging;
 mod notifications;
+mod suspend;
 
 static IS_QUITTING: AtomicBool = AtomicBool::new(false);
 
@@ -74,10 +75,11 @@ pub(crate) fn build_main_window(
         // the page as native HTML5 drag-drop events (dragenter/dragover/drop
         // with dataTransfer.files) which ChatGPT already handles.
         .disable_drag_drop_handler()
-        // ponytail: keep the scroll path and the page timers alive. When the
-        // window is minimized or hidden, Chromium clamps timers to about one
-        // tick per minute, which starved the answer-completion watcher.
-        .additional_browser_args("--disable-background-timer-throttling")
+        // ponytail: allow Chromium background timer throttling when the
+        // window is minimized/hidden so occluded WebView2 frames stop
+        // waking every 500ms. The watcher re-arms at a slower hidden
+        // cadence (see notifications.js SCAN_HIDDEN) and resumes on
+        // visibilitychange, so completion notices still fire.
         .on_navigation(move |url| {
             if links::is_allowed_url(url) {
                 return true;
@@ -122,6 +124,9 @@ pub(crate) fn build_main_window(
 }
 
 pub(crate) fn show_main_window(app_handle: &tauri::AppHandle) {
+    // ponytail: thaw the renderer tree before touching the webview; a
+    // freeze may be pending (cancelled here) or already applied.
+    crate::suspend::note_shown();
     if let Some(window) = app_handle.get_webview_window("main") {
         let _ = window.show();
         let _ = window.unminimize();
@@ -157,6 +162,7 @@ fn main() {
             // If autostart is enabled, launch minimized to tray
             if std::env::args().any(|arg| arg == "--autostart") {
                 let _ = main_window.hide();
+                crate::suspend::note_hidden();
             } else {
                 // ponytail: guarantee visible window on manual launch
                 let _ = main_window.show();
@@ -171,6 +177,7 @@ fn main() {
                     if !IS_QUITTING.load(Ordering::SeqCst) {
                         api.prevent_close();
                         let _ = win_clone.hide();
+                        crate::suspend::note_hidden();
                     }
                 }
                 _ => {}
@@ -240,6 +247,9 @@ fn main() {
                     }
                     "close" => {
                         IS_QUITTING.store(true, Ordering::SeqCst);
+                        // ponytail: thaw before exit so no frozen WebView2
+                        // orphans are left behind.
+                        crate::suspend::note_shown();
                         app_handle.exit(0);
                     }
                     _ => {}
