@@ -18,6 +18,13 @@ Rune draws no chrome: no rail, no top bar, no backdrop, no frame. The page is
 the window. Clicks and keys go straight to WebView2, and the page keeps its own
 session, cookies and streaming.
 
+## One instance
+
+A named mutex (`Local\ChatGPT.SingleInstance`) decides who is first. A second
+launch signals a named event and exits, so there is never a second tray icon or
+a second WebView2 tree; the first instance shows its window. `--quit` asks the
+running instance to exit, which is how the installer replaces a running copy.
+
 ## Tray, startup and session
 
 - Closing the window hides it; the app keeps running in the tray. The tray icon
@@ -45,21 +52,27 @@ session, cookies and streaming.
 
 ## Links
 
-Every link leaves the app for the operating system's default browser. Two
-WebView2 events cover it, in src/webview.rs:
+src/links.rs is an explicit policy rather than ad-hoc host checks. A
+`LinkPolicy` classifies a URL into a `LinkKind`, and the two decisions the app
+needs are separate methods, so the rules are testable with no window and no
+WebView2:
 
-- `NewWindowRequested` is a link with `target=_blank` or a `window.open`. Left
-  alone, WebView2 opens its own window for it — the in-app browser window this
-  app must never show — so it is always marked handled and the URL goes to the
-  browser.
-- `NavigationStarting` is a plain click that would replace the page with a
-  foreign site. That navigation is cancelled and the URL goes to the browser, so
-  the page stays where it was.
+| `LinkKind` | a `NewWindowRequested` popup | a `NavigationStarting` |
+| --- | --- | --- |
+| `Main` (chatgpt.com) | navigate the one window there is | allow |
+| `Auth` (sign-in providers) | let WebView2 open it in-profile | allow |
+| `Internal` (about:blank, blob:, data:) | let WebView2 open it | allow |
+| `External` (any other host, mailto) | open in the default browser | cancel, open in the browser |
+| `Blocked` (javascript:, file:, …) | drop | cancel |
 
-src/links.rs decides what counts as foreign: chatgpt.com and the identity
-providers its sign-in flow uses stay in the app, and every other http(s) host
-plus mailto leaves. `about:blank`, `blob:`, `data:` and `javascript:` are left
-to the webview so the page keeps working. Each hand-off is logged.
+Nothing the page opens is silently dropped: the only things that are dropped
+are the schemes that must never be followed. A ChatGPT `target=_blank` link keeps
+one window instead of opening a second ChatGPT surface, and sign-in popups stay
+in-profile so the flow keeps the session it is establishing.
+
+The external-browser hand-off runs on its own thread, so a slow process launch
+never happens inside a WebView2 callback. Logged URLs are reduced to scheme and
+host: no path, no query string, no token.
 
 ## Wiring
 
@@ -110,10 +123,17 @@ cd installer
 & "$env:LOCALAPPDATA\tauri\NSIS\makensis.exe" chatgpt.nsi
 ~~~
 
-That writes dist\ChatGPT_1.0.15_x64-setup.exe. It installs per-user into
+That writes dist\ChatGPT_1.0.16_x64-setup.exe. It installs per-user into
 %LOCALAPPDATA%\ChatGPT, so it needs no elevation, and adds a Desktop
 shortcut, a Start Menu entry and an Add/Remove Programs entry with an
 uninstaller. Run it with /S for a silent install.
+
+On upgrade it asks a running copy to quit with %%--quit%% before replacing the
+executable. On uninstall it removes its own Run value, shortcuts and registry
+key, and it leaves the WebView2 profile alone because that holds the sign-in.
+The uninstall entry lives under a GUID key, not a generic "ChatGPT" name, and
+%%UninstallString%% is quoted. If the Evergreen WebView2 Runtime is missing the
+installer says so instead of leaving the app with a blank window.
 
 ## Diagnostics
 
