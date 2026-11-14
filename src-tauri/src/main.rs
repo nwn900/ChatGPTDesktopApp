@@ -10,10 +10,10 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt;
 
+mod lifecycle;
 mod links;
 mod logging;
 mod notifications;
-mod suspend;
 
 static IS_QUITTING: AtomicBool = AtomicBool::new(false);
 
@@ -124,20 +124,17 @@ pub(crate) fn build_main_window(
 }
 
 pub(crate) fn show_main_window(app_handle: &tauri::AppHandle) {
-    // ponytail: thaw the renderer tree before touching the webview; a
-    // freeze may be pending (cancelled here) or already applied.
-    crate::suspend::note_shown();
+    crate::lifecycle::note_shown(app_handle);
     if let Some(window) = app_handle.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
+        // ponytail: restore off the event-loop thread. ShowWindow and
+        // SetForegroundWindow send synchronous messages to explorer.exe, so a
+        // wedged shell would otherwise freeze the whole app.
+        crate::lifecycle::restore_window(app_handle, window);
         return;
     }
     // ponytail: tray-only trap — main window gone, rebuild it
     if let Ok(window) = build_main_window(app_handle) {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
+        crate::lifecycle::restore_window(app_handle, window);
     }
 }
 
@@ -157,12 +154,18 @@ fn main() {
             links::open_external
         ])
         .setup(|app| {
+            // ponytail: clear WebView2 processes a killed run left behind
+            // before this process builds its own, so a stale suspended tree
+            // cannot fight this launch over the same EBWebView profile.
+            crate::lifecycle::reap_orphans(app.handle());
+            crate::lifecycle::start_watchdog(app.handle().clone());
+
             let main_window = build_main_window(app.handle())?;
 
             // If autostart is enabled, launch minimized to tray
             if std::env::args().any(|arg| arg == "--autostart") {
                 let _ = main_window.hide();
-                crate::suspend::note_hidden();
+                crate::lifecycle::note_hidden(app.handle());
             } else {
                 // ponytail: guarantee visible window on manual launch
                 let _ = main_window.show();
@@ -172,12 +175,13 @@ fn main() {
 
             // Hide to tray on close
             let win_clone = main_window.clone();
+            let hide_app = app.handle().clone();
             main_window.on_window_event(move |event| match event {
                 WindowEvent::CloseRequested { api, .. } => {
                     if !IS_QUITTING.load(Ordering::SeqCst) {
                         api.prevent_close();
                         let _ = win_clone.hide();
-                        crate::suspend::note_hidden();
+                        crate::lifecycle::note_hidden(&hide_app);
                     }
                 }
                 _ => {}
@@ -247,9 +251,6 @@ fn main() {
                     }
                     "close" => {
                         IS_QUITTING.store(true, Ordering::SeqCst);
-                        // ponytail: thaw before exit so no frozen WebView2
-                        // orphans are left behind.
-                        crate::suspend::note_shown();
                         app_handle.exit(0);
                     }
                     _ => {}
