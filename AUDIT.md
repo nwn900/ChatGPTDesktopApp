@@ -248,5 +248,38 @@ unreadable kind goes straight to the failure surface instead of retrying.
 - Benchmark run before and after on the installed build, with the restore
   checked by a window capture rather than by process liveness.
 
+## v1.0.18 — issue #1, answer-completion notifications
+
+### P2.8 — notifications restored
+
+The Tauri build raised a toast when an answer finished; the Rune build had none.
+It is back, without the old wrapper's cost:
+
+- `rune-app/src/notifications.js` is injected with
+  `AddScriptToExecuteOnDocumentCreated`, so it runs in every document the page
+  creates. A MutationObserver marks the page dirty and a debounced scan reads the
+  last assistant message's `textContent`, which does not force layout. The scan
+  backs off from 1 s to 3 s while the page is hidden, and the fast path skips the
+  DOM entirely when nothing changed.
+- The page posts `notify\n<body>` over `window.chrome.webview`;
+  `WebMessageReceived` turns it into a toast. Only the last 300 characters are
+  sent, once per completion, and nothing is stored.
+- The toast is suppressed while the window is visible and in front
+  (`IsWindowVisible` plus `GetForegroundWindow`), so it only fires when the
+  answer finished while you were elsewhere. Clicking it restores the window.
+- The toast uses the same app id the previous build used, so the Windows
+  notification registration carries over.
+
+Verified over CDP: the watcher reports itself installed, a posted completion
+produced `toast: Ok(())` while the window was hidden to the tray, and the same
+post produced no toast while the window was in front.
+
+### Still open on the issue
+
+- Download UX, accessibility and the manual test matrix.
+- A deep-idle `TrySuspend`/`Resume` mode, which would need the same restore
+  proof that rejected the visibility controls in v1.0.17.
+
+
 
 

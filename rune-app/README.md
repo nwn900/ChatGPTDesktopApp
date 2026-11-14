@@ -50,6 +50,22 @@ running instance to exit, which is how the installer replaces a running copy.
     src-tauri/icons/icon.png (512 px).
   - The tray icon is src-tauri/icons/32x32.png.
 
+## Notifications
+
+A finished answer raises a Windows toast, and clicking it restores the window.
+
+- `src/notifications.js` is injected into every document the page creates. A
+  MutationObserver marks the page dirty, a debounced scan reads the last
+  assistant message's `textContent` (which does not force layout), and the scan
+  backs off from 1 s to 3 s while the page is hidden. Only the last 300
+  characters are sent, once per completion.
+- The page posts `notify\n<body>` over `window.chrome.webview`, and
+  `WebMessageReceived` turns it into a toast.
+- The toast is suppressed while the window is visible and in front, so it only
+  fires when the answer finished while you were elsewhere.
+- The toast uses the same app id the previous build used, so the Windows
+  notification registration carries over.
+
 ## Links
 
 src/links.rs is an explicit policy rather than ad-hoc host checks. A
@@ -123,7 +139,7 @@ cd installer
 & "$env:LOCALAPPDATA\tauri\NSIS\makensis.exe" chatgpt.nsi
 ~~~
 
-That writes dist\ChatGPT_1.0.17_x64-setup.exe. It installs per-user into
+That writes dist\ChatGPT_1.0.18_x64-setup.exe. It installs per-user into
 %LOCALAPPDATA%\ChatGPT, so it needs no elevation, and adds a Desktop
 shortcut, a Start Menu entry and an Add/Remove Programs entry with an
 uninstaller. Run it with /S for a silent install.

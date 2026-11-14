@@ -1,6 +1,6 @@
 [package]
 name = "chatgpt"
-version = "1.0.17"
+version = "1.0.18"
 edition = "2024"
 description = "ChatGPT desktop app: Rune draws the UI, Edge WebView2 shows the page"
 license = "ISC"
@@ -13,6 +13,7 @@ rune = { path = "../../rune-src/crates/rune" }
 webview2-com = "0.38"
 open = "5"
 png = "0.17"
+tauri-winrt-notification = "0.7"
 url = "2"
 windows = { version = "0.61", features = [
     "Win32_Foundation",

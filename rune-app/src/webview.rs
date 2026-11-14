@@ -22,15 +22,24 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
     ICoreWebView2Environment, ICoreWebView2EnvironmentOptions,
 };
 use webview2_com::{
+    AddScriptToExecuteOnDocumentCreatedCompletedHandler,
     CreateCoreWebView2ControllerCompletedHandler, CreateCoreWebView2EnvironmentCompletedHandler,
     NavigationStartingEventHandler, NewWindowRequestedEventHandler, ProcessFailedEventHandler,
-    take_pwstr,
+    WebMessageReceivedEventHandler, take_pwstr,
 };
 use windows::Win32::Foundation::{HWND, RECT};
-use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetClientRect, GetForegroundWindow, IsWindowVisible,
+};
 use windows::core::{HSTRING, PCWSTR, PWSTR};
 
 use crate::links::{ChatGptPolicy, LinkPolicy, Navigation, Popup};
+
+/// The page watcher, injected into every document the page creates.
+const WATCHER: &str = include_str!("notifications.js");
+
+/// What to do with a completion the page reports.
+static NOTIFY: OnceLock<Box<dyn Fn(&str) + Send + Sync>> = OnceLock::new();
 
 /// Where the page is in its life.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -192,7 +201,8 @@ pub fn open_in_browser() {
 
 /// Start creating the WebView2 under the Rune window. Returns at once; only the
 /// first call for a live window does anything.
-pub fn start(parent: HWND, url: &'static str) {
+pub fn start(parent: HWND, url: &'static str, on_notify: impl Fn(&str) + Send + Sync + 'static) {
+    let _ = NOTIFY.set(Box::new(on_notify));
     set_parent(parent);
     let begun = HOST.with(|host| {
         let Ok(mut host) = host.try_borrow_mut() else {
@@ -290,6 +300,8 @@ fn create_controller(parent: HWND, environment: ICoreWebView2Environment, url: &
             };
             install_link_handlers(&core);
             install_process_handlers(&core);
+            install_message_handler(&core);
+            install_watcher(&core);
             if let Err(error) = unsafe { controller.SetIsVisible(true) } {
                 log(&format!("set visible failed: {error:?}"));
             }
@@ -310,6 +322,68 @@ fn create_controller(parent: HWND, environment: ICoreWebView2Environment, url: &
     let immediate = unsafe { environment.CreateCoreWebView2Controller(parent, &handler) };
     if let Err(error) = immediate {
         fail(&format!("controller call: {error:?}"));
+    }
+}
+
+/// Receive the page's completion reports.
+fn install_message_handler(core: &ICoreWebView2) {
+    let handler = WebMessageReceivedEventHandler::create(Box::new(|_sender, args| {
+        let Some(args) = args else {
+            return Ok(());
+        };
+        let mut raw = PWSTR::null();
+        if unsafe { args.TryGetWebMessageAsString(&mut raw) }.is_err() {
+            return Ok(());
+        }
+        let text = take_pwstr(raw);
+        if let Some(body) = text.strip_prefix(
+            "notify
+",
+        ) {
+            deliver(body);
+        }
+        Ok(())
+    }));
+    let mut token = 0;
+    if let Err(error) = unsafe { core.add_WebMessageReceived(&handler, &mut token) } {
+        log(&format!("add_WebMessageReceived failed: {error:?}"));
+    }
+}
+
+/// Hand a completion to the app, unless the user is already looking at it.
+fn deliver(body: &str) {
+    let body = body.trim();
+    if body.is_empty() || window_is_active() {
+        return;
+    }
+    if let Some(notify) = NOTIFY.get() {
+        notify(body);
+    }
+}
+
+/// Whether the page is on screen and in front, so a notification would be noise.
+fn window_is_active() -> bool {
+    let Some(parent) = parent() else {
+        return false;
+    };
+    unsafe { IsWindowVisible(parent).as_bool() && GetForegroundWindow() == parent }
+}
+
+/// Inject the completion watcher into every document the page creates.
+fn install_watcher(core: &ICoreWebView2) {
+    let handler =
+        AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(|error, _id| {
+            if error.is_err() {
+                log(&format!("watcher injection failed: {error:?}"));
+            }
+            Ok(())
+        }));
+    if let Err(error) =
+        unsafe { core.AddScriptToExecuteOnDocumentCreated(&HSTRING::from(WATCHER), &handler) }
+    {
+        log(&format!(
+            "AddScriptToExecuteOnDocumentCreated failed: {error:?}"
+        ));
     }
 }
 

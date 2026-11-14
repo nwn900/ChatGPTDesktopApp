@@ -91,7 +91,7 @@ jobs:
           if (-not (Test-Path $exe)) { throw "$exe was not built" }
           $info = (Get-Item $exe).VersionInfo
           if ($info.ProductName -ne "ChatGPT") { throw "unexpected ProductName: $($info.ProductName)" }
-          if ($info.FileVersion -ne "1.0.17") { throw "unexpected FileVersion: $($info.FileVersion)" }
+          if ($info.FileVersion -ne "1.0.18") { throw "unexpected FileVersion: $($info.FileVersion)" }
           Get-FileHash $exe -Algorithm SHA256 | Format-List
           Get-FileHash (Get-ChildItem ../rune-app/dist/ChatGPT_*_x64-setup.exe).FullName -Algorithm SHA256 | Format-List
 

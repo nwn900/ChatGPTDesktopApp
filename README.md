@@ -8,7 +8,7 @@ chatgpt.com page.
 
 ## Downloads
 
-[Download v1.0.17](https://github.com/nwn900/ChatGPTDesktopApp/releases/tag/v1.0.17)
+[Download v1.0.18](https://github.com/nwn900/ChatGPTDesktopApp/releases/tag/v1.0.18)
 — Windows x64 NSIS installer, compiled locally.
 
 ## What it is
@@ -64,7 +64,7 @@ cd installer
 & "$env:LOCALAPPDATA\tauri\NSIS\makensis.exe" chatgpt.nsi
 ~~~
 
-That writes `rune-app\dist\ChatGPT_1.0.17_x64-setup.exe`. It installs per-user
+That writes `rune-app\dist\ChatGPT_1.0.18_x64-setup.exe`. It installs per-user
 into %LOCALAPPDATA%\ChatGPT, so it needs no elevation, and adds a Desktop
 shortcut, a Start Menu entry and an Add/Remove Programs entry with an
 uninstaller. Run it with /S for a silent install.

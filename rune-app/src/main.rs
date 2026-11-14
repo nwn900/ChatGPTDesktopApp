@@ -35,6 +35,9 @@ const TRAY_ICON: &[u8] = include_bytes!("../../src-tauri/icons/32x32.png");
 /// The live tray, so a menu pick can relabel the startup item.
 static TRAY: OnceLock<Arc<Tray>> = OnceLock::new();
 
+/// The app handle, for the notification click that has to restore the window.
+static APP: OnceLock<rune::AppHandle<()>> = OnceLock::new();
+
 thread_local! {
     /// The state the view was last drawn for, so poll reports a change once.
     static DRAWN: Cell<webview::State> = const { Cell::new(webview::State::Idle) };
@@ -203,6 +206,21 @@ fn main() {
         handle.open();
     }
 
+    /// A Windows toast for a finished answer; clicking it restores the window.
+    fn notify(body: &str) {
+        let result = tauri_winrt_notification::Toast::new("com.chatgpt.desktop")
+            .title("ChatGPT")
+            .text1(body)
+            .on_activated(|_| {
+                if let Some(handle) = APP.get() {
+                    show(handle);
+                }
+                Ok(())
+            })
+            .show();
+        webview::log(&format!("toast: {result:?}"));
+    }
+
     let app = rune::App::new(AppSpec {
         poll: Some(poll),
         ..AppSpec::new("ChatGPT", (1180.0, 760.0), || (), view)
@@ -214,7 +232,7 @@ fn main() {
         let _ = handle.with_raw_handle(|raw| {
             if let RawWindowHandle::Win32(win32) = raw.as_raw() {
                 let hwnd = HWND(win32.hwnd.get() as *mut _);
-                webview::start(hwnd, TARGET_URL);
+                webview::start(hwnd, TARGET_URL, notify);
             }
         });
     });
@@ -222,6 +240,7 @@ fn main() {
     // The tray runs on its own thread, so it answers while the window is
     // hidden. TRAY keeps it alive for the life of the process.
     let handle = app.handle();
+    let _ = APP.set(handle.clone());
     let startup = autostart::is_enabled();
     webview::log(&format!("startup at launch: {startup}"));
     let tray = match Tray::new(
