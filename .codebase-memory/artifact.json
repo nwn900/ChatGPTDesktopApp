@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "a920baac4c18827da9870e72d35a801fe224465e",
-    "indexed_at": "2026-07-21T18:32:17Z",
-    "project": "chatgpt-web-app",
-    "nodes": 99,
-    "edges": 117,
-    "original_size": 1900544,
-    "compressed_size": 54132,
+    "commit": "442504f4a257d142aa7ab7206f008874c44fb9d6",
+    "indexed_at": "2026-10-15T20:12:03Z",
+    "project": "G-Projects-ChatGPT-Web-App",
+    "nodes": 755,
+    "edges": 972,
+    "original_size": 5308416,
+    "compressed_size": 365019,
     "compression_level": 3
 }

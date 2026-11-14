@@ -1,6 +1,9 @@
 node_modules/
 dist/
 src-tauri/target/
+rune-app/target/
+rune-app/dist/
+rune-app/chat.png
 .vscode/
 .idea/
 *.swp

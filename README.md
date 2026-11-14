@@ -1,41 +1,92 @@
 # ChatGPT Desktop
 
-A Windows desktop app for ChatGPT, built with Rust, Tauri 2 and Microsoft Edge WebView2.
+A native Windows desktop app for ChatGPT. [Rune](https://github.com/anomalyco/rune)
+draws the window and the system tray; Microsoft Edge WebView2 shows the
+chatgpt.com page.
 
 ![ChatGPT](icon.png)
 
 ## Downloads
 
-[Download v1.0.14](https://github.com/nwn900/ChatGPTDesktopApp/releases/tag/v1.0.14) — Windows x64 NSIS installer, compiled locally.
+[Download v1.0.15](https://github.com/nwn900/ChatGPTDesktopApp/releases/tag/v1.0.15)
+— Windows x64 NSIS installer, compiled locally.
+
+## What it is
+
+Rune has no webview, and the chat surface should be ChatGPT itself rather than a
+reimplementation, so the two are combined:
+
+- The window is a **Rune window** (winit + wgpu). Rune owns the event loop, the
+  input and the tray icon.
+- The page is a **WebView2 child HWND** parented to that window and sized to the
+  whole client area.
+
+Rune draws no chrome: no rail, no top bar, no frame. The page is the window.
+Clicks and keys go straight to WebView2, and the page keeps its own session,
+cookies and streaming.
 
 ## Features
 
-- System tray, single instance, and hide on close.
-- Manual launch opens the window; Windows startup uses the explicit `--autostart` argument.
-- Answer-completion notifications while the main window is inactive. Click a notification to restore the app.
-- Links open in the Windows default browser. Sign-in pages stay in the app, and file-download dialogs are native.
-- Transparent application icon.
+- Closing the window hides it; the app keeps running in the tray. The tray icon
+  reopens it.
+- Tray menu: **Open ChatGPT**, **Launch at system startup: On/Off**, **Quit**.
+  The startup item writes the per-user Run key, so it needs no elevation.
+- Started from that Run key the app passes `--autostart` and opens in the tray
+  with no window.
+- Every link opens in the Windows default browser. A `target=_blank` link or a
+  `window.open` is marked handled so WebView2 never opens a second window, and
+  a plain click that would replace the page is cancelled; both hand the URL to
+  the operating system. Sign-in hosts stay inside the app so authentication
+  keeps working.
+- The page uses the same WebView2 profile as the previous build
+  (`%LOCALAPPDATA%\com.chatgpt.desktop`), so the sign-in and conversation list
+  carry over. If another process holds the profile the app falls back to the
+  default one rather than showing a blank window.
+- The project icon is embedded in the executable, so the title bar, taskbar,
+  Start Menu shortcut, Desktop shortcut and Add/Remove Programs all show it.
 
-Completion detection observes page mutations and reads text without forcing layout. It does not continually scan an idle page. Selectors live in `src-tauri/src/notifications.js`; service redesigns can require selector updates. Native delivery status is recorded in a bounded `notifications.log` under the application's log directory.
+## Layout
 
-A click on a link the app does not own is routed explicitly to the operating system instead of being left to the webview's new-window handling, so it cannot end up in an in-app window or in the ChatGPT window itself. The keep-in-app host list lives in `src-tauri/src/links.rs` and is injected into the page; every external launch is recorded in a bounded `links.log` next to `notifications.log`.
+- `rune-app/` — the current app: Rune for the UI, Edge WebView2 for the page.
+- `src-tauri/` — the previous Tauri build, kept for reference.
 
 ## Build locally
 
-Install Rust's MSVC toolchain, Visual Studio C++ Build Tools, WebView2, and the Tauri CLI (`cargo install tauri-cli --locked`). Use a Visual Studio developer shell with `CC=cl.exe` and `CXX=cl.exe`.
+Rune is pre-release and is consumed from a checkout. Clone it beside this
+repository:
 
-```powershell
-cd src-tauri
-cargo test --locked
-cargo tauri build -- --locked
-```
+~~~powershell
+git clone https://github.com/anomalyco/rune.git ..\..\rune-src
+cd rune-app
+cargo test
+cargo build --release
+cd installer
+& "$env:LOCALAPPDATA\tauri\NSIS\makensis.exe" chatgpt.nsi
+~~~
 
-The installer is generated in `target/release/bundle/nsis/`. To limit disk usage, set `CARGO_TARGET_DIR` to a dedicated directory on a drive with free space, set `CARGO_INCREMENTAL=0`, and build one app at a time. Copy completed installers outside the target directory before running `cargo clean`.
+That writes `rune-app\dist\ChatGPT_1.0.15_x64-setup.exe`. It installs per-user
+into %LOCALAPPDATA%\ChatGPT, so it needs no elevation, and adds a Desktop
+shortcut, a Start Menu entry and an Add/Remove Programs entry with an
+uninstaller. Run it with /S for a silent install.
 
-Run JavaScript regression tests with `node --test tests/*.test.cjs` (17 tests: page watcher and link routing).
+Rune ships patched copies of four crates.io packages, so an app that builds it
+has to republish those patches — that is the `[patch.crates-io]` block in
+`rune-app/Cargo.toml`. Pin a Rune `dev` rev rather than tracking `main`.
 
-Releases are uploaded from local builds. Tag pushes do not run a GitHub installer build.
+Build with `CC`/`CXX` unset (or set to `cl.exe`). A global `CXX=g++`
+makes `vswhom-sys` emit a MinGW object that MSVC `link.exe` rejects with
+`LNK1143`.
+
+The JavaScript regression tests for the previous Tauri wrapper run with
+`node --test tests/*.test.cjs`.
 
 ## Verification limits
 
-Automated tests cover wrapper logic and simulated page signals. Signed-in provider flows, real response completion, Windows notification visibility, and rendering timings require live verification. Windows notification settings and Do Not Disturb can suppress visible banners.
+Automated tests cover the link policy, the placement math and the page signals.
+Signed-in provider flows, real response completion, rendering timings and the
+system tray need live verification. Windows notification settings and Do Not
+Disturb can suppress banners.
+
+The current build has no answer-completion notifications — that watcher lives in
+the previous Tauri build under `src-tauri/` — and no single-instance guard, so
+launching the app twice starts two processes.
