@@ -16,12 +16,15 @@ use std::sync::OnceLock;
 use std::sync::mpsc::Sender;
 
 use webview2_com::Microsoft::Web::WebView2::Win32::{
+    COREWEBVIEW2_PROCESS_FAILED_KIND, COREWEBVIEW2_PROCESS_FAILED_KIND_FRAME_RENDER_PROCESS_EXITED,
+    COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED,
     CreateCoreWebView2EnvironmentWithOptions, ICoreWebView2, ICoreWebView2Controller,
     ICoreWebView2Environment, ICoreWebView2EnvironmentOptions,
 };
 use webview2_com::{
     CreateCoreWebView2ControllerCompletedHandler, CreateCoreWebView2EnvironmentCompletedHandler,
-    NavigationStartingEventHandler, NewWindowRequestedEventHandler, take_pwstr,
+    NavigationStartingEventHandler, NewWindowRequestedEventHandler, ProcessFailedEventHandler,
+    take_pwstr,
 };
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
@@ -46,6 +49,8 @@ pub enum State {
 struct Host {
     state: State,
     view: Option<WebView>,
+    /// Renderer restarts since the environment came up, so a crash loop stops.
+    reloads: u32,
 }
 
 impl Host {
@@ -53,6 +58,7 @@ impl Host {
         Self {
             state: State::Idle,
             view: None,
+            reloads: 0,
         }
     }
 
@@ -283,6 +289,7 @@ fn create_controller(parent: HWND, environment: ICoreWebView2Environment, url: &
                 }
             };
             install_link_handlers(&core);
+            install_process_handlers(&core);
             if let Err(error) = unsafe { controller.SetIsVisible(true) } {
                 log(&format!("set visible failed: {error:?}"));
             }
@@ -304,6 +311,52 @@ fn create_controller(parent: HWND, environment: ICoreWebView2Environment, url: &
     if let Err(error) = immediate {
         fail(&format!("controller call: {error:?}"));
     }
+}
+
+/// Restart the page when a renderer dies, and stop before a crash loop.
+fn install_process_handlers(core: &ICoreWebView2) {
+    let handler = ProcessFailedEventHandler::create(Box::new(|_sender, args| {
+        let Some(args) = args else {
+            return Ok(());
+        };
+        let mut kind = COREWEBVIEW2_PROCESS_FAILED_KIND(0);
+        if let Err(error) = unsafe { args.ProcessFailedKind(&mut kind) } {
+            log(&format!("process failed, kind unreadable: {error:?}"));
+            fail("process failed");
+            return Ok(());
+        }
+        recover(kind);
+        Ok(())
+    }));
+    let mut token = 0;
+    if let Err(error) = unsafe { core.add_ProcessFailed(&handler, &mut token) } {
+        log(&format!("add_ProcessFailed failed: {error:?}"));
+    }
+}
+
+/// A dead renderer is reloadable; a dead browser process is not.
+fn recover(kind: COREWEBVIEW2_PROCESS_FAILED_KIND) {
+    let reloadable = kind.0 == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED.0
+        || kind.0 == COREWEBVIEW2_PROCESS_FAILED_KIND_FRAME_RENDER_PROCESS_EXITED.0;
+    if !reloadable {
+        log(&format!("process failed: kind {}", kind.0));
+        fail(&format!("process failed: kind {}", kind.0));
+        return;
+    }
+    let attempts = HOST.with(|host| {
+        let Ok(mut host) = host.try_borrow_mut() else {
+            return 0;
+        };
+        host.reloads += 1;
+        host.reloads
+    });
+    if attempts > 3 {
+        log("renderer failed repeatedly; not reloading again");
+        fail("renderer failed repeatedly");
+        return;
+    }
+    log(&format!("renderer failed; reload {attempts}/3"));
+    with(|web| web.reload());
 }
 
 /// Apply the link policy to both WebView2 events that decide where a link goes.

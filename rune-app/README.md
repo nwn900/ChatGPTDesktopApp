@@ -123,7 +123,7 @@ cd installer
 & "$env:LOCALAPPDATA\tauri\NSIS\makensis.exe" chatgpt.nsi
 ~~~
 
-That writes dist\ChatGPT_1.0.16_x64-setup.exe. It installs per-user into
+That writes dist\ChatGPT_1.0.17_x64-setup.exe. It installs per-user into
 %LOCALAPPDATA%\ChatGPT, so it needs no elevation, and adds a Desktop
 shortcut, a Start Menu entry and an Add/Remove Programs entry with an
 uninstaller. Run it with /S for a silent install.

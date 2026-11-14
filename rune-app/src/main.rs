@@ -198,6 +198,11 @@ fn main() {
     // Started by the Run key: open in the tray, not on screen.
     let from_startup = std::env::args().any(|arg| arg == "--autostart");
 
+    /// Show the window.
+    fn show(handle: &rune::AppHandle<()>) {
+        handle.open();
+    }
+
     let app = rune::App::new(AppSpec {
         poll: Some(poll),
         ..AppSpec::new("ChatGPT", (1180.0, 760.0), || (), view)
@@ -226,8 +231,8 @@ fn main() {
         {
             let handle = handle.clone();
             move |event| match event {
-                TrayEvent::Activate { .. } => handle.open(),
-                TrayEvent::Menu(id) if id == "open" => handle.open(),
+                TrayEvent::Activate { .. } => show(&handle),
+                TrayEvent::Menu(id) if id == "open" => show(&handle),
                 TrayEvent::Menu(id) if id == "reload" => {
                     if webview::with(|web| web.reload()).is_none() {
                         webview::log("reload ignored: no page");
@@ -281,7 +286,7 @@ fn main() {
 
     // A second launch signals this event; show the window that already exists.
     let activation = handle.clone();
-    single_instance::listen_activation(move || activation.open());
+    single_instance::listen_activation(move || show(&activation));
     // An installer replacing the app signals this one.
     let quitting = handle.clone();
     single_instance::listen_quit(move || quitting.quit());

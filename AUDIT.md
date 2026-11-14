@@ -191,4 +191,62 @@ The tray menu gained **Reload** next to Open ChatGPT and the startup toggle.
   hidden window, CDP-driven link policy, installer upgrade over a running app,
   and uninstall removing the Run value while keeping the profile.
 
+## v1.0.17 — issue #1, performance measured and rejected
+
+### P1.5 — the supported controls were tried, measured, and rejected
+
+A repeatable benchmark (`%TEMP%\bench.ps1`) samples the host process and every
+`msedgewebview2` descendant over a fixed window: CPU as a percentage of one
+core, and summed working set.
+
+Baseline, v1.0.16, no WebView2 visibility or memory calls:
+
+| phase | CPU | working set |
+| --- | --- | --- |
+| visible idle | 2.7% | 846 MB |
+| tray-hidden idle | 0.5% | 825 MB |
+| restored idle | 8.7% | 910 MB |
+
+Chromium already throttles a hidden window: idle CPU falls to 0.5% on its own.
+
+Then `ICoreWebView2Controller::SetIsVisible(false)` on hide and
+`ICoreWebView2_19::SetMemoryUsageTargetLevel(LOW)` while hidden, both on the
+COM thread, restored on show:
+
+| phase | CPU | working set |
+| --- | --- | --- |
+| visible idle | 2.1% | 837 MB |
+| tray-hidden idle | 0.5% | 116 MB |
+| restored idle | 0% | 133 MB |
+
+The RAM drop is real — and so is the regression: **the page came back blank**.
+A window capture after restore was an empty surface, and the renderer was still
+alive at 706 MB, so it was not a crash. Removing the memory target and keeping
+only `SetIsVisible` produced the same blank page. Removing both restored the
+page correctly, which isolates the cause to the visibility call.
+
+So neither control ships. The issue asked to "validate that restored
+interactivity is not worsened by excessive swapping"; it is, and a blank window
+is worse than the RAM it saves. The baseline already reaches 0.5% idle CPU while
+hidden, so there is no measured CPU win to trade against.
+
+This is the same failure class as v1.0.14's process freeze, reached by a
+supported API instead of `NtSuspendProcess`: anything that stops the page
+compositing while the window is hidden has to be proven to come back, and this
+one does not.
+
+### P1.3 — renderer crash recovery
+
+`ProcessFailed` is now registered. A dead renderer or frame renderer reloads
+the page, capped at three attempts so a crash loop stops and falls through to
+the failure surface; a dead browser process, an unresponsive renderer or an
+unreadable kind goes straight to the failure surface instead of retrying.
+
+### Verification
+
+- 10 Rust unit tests, `cargo fmt --check` clean.
+- Benchmark run before and after on the installed build, with the restore
+  checked by a window capture rather than by process liveness.
+
+
 

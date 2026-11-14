@@ -1,6 +1,6 @@
 [package]
 name = "chatgpt"
-version = "1.0.16"
+version = "1.0.17"
 edition = "2024"
 description = "ChatGPT desktop app: Rune draws the UI, Edge WebView2 shows the page"
 license = "ISC"
