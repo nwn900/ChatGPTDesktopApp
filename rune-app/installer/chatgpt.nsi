@@ -7,7 +7,7 @@ Unicode true
 !include "LogicLib.nsh"
 
 !define PRODUCT "ChatGPT"
-!define VERSION "1.0.18"
+!define VERSION "1.0.19"
 !define EXE "chatgpt.exe"
 !define PUBLISHER "nwn900"
 ; Namespaced so it cannot collide with another ChatGPT program's entry.

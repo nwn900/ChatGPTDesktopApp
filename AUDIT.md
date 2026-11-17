@@ -280,6 +280,27 @@ post produced no toast while the window was in front.
 - A deep-idle `TrySuspend`/`Resume` mode, which would need the same restore
   proof that rejected the visibility controls in v1.0.17.
 
+## v1.0.19 — downloads ask where to save
+
+WebView2's default is to drop a download into the Downloads folder without a
+word. Now every download opens a Save As dialog and the next one starts in the
+folder last used.
+
+- `DownloadStarting` is handled on `ICoreWebView2_4`; an older Runtime keeps
+  the default behaviour instead of losing downloads.
+- The dialog is pre-filled with the name WebView2 would have used and defaults
+  to the remembered folder, or to the Downloads folder the first time.
+- Choosing a path sets `ResultFilePath` and marks the event handled, so
+  WebView2 does not also show its own download shelf. Cancelling cancels the
+  download rather than saving it somewhere the user did not choose.
+- The folder lives in `HKCU\Software\nwn900\ChatGPT` as `LastDownloadDir` and
+  is only offered again if it still exists. The path is never logged.
+
+Verified end to end on the running app: a blob download triggered the dialog,
+the chosen path was written, the file landed there with the right contents, and
+`LastDownloadDir` held the folder afterwards.
+
+
 
 
 

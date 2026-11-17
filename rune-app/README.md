@@ -66,6 +66,21 @@ A finished answer raises a Windows toast, and clicking it restores the window.
 - The toast uses the same app id the previous build used, so the Windows
   notification registration carries over.
 
+## Downloads
+
+Every download asks where to save it, and the next one starts in the folder you
+last used.
+
+- `DownloadStarting` is handled on the WebView2 1.4 interface (an older Runtime
+  keeps the default behaviour rather than losing downloads). The dialog is
+  pre-filled with the name WebView2 would have used, and defaults to the last
+  folder, or to the Downloads folder the first time.
+- Choosing a path sets `ResultFilePath` and marks the event handled, so WebView2
+  does not also show its own download shelf. Cancelling cancels the download
+  rather than saving it somewhere you did not choose.
+- The folder is stored in `HKCU\Software\nwn900\ChatGPT` as `LastDownloadDir`
+  and only offered again if it still exists. The path itself is never logged.
+
 ## Links
 
 src/links.rs is an explicit policy rather than ad-hoc host checks. A
@@ -139,7 +154,7 @@ cd installer
 & "$env:LOCALAPPDATA\tauri\NSIS\makensis.exe" chatgpt.nsi
 ~~~
 
-That writes dist\ChatGPT_1.0.18_x64-setup.exe. It installs per-user into
+That writes dist\ChatGPT_1.0.19_x64-setup.exe. It installs per-user into
 %LOCALAPPDATA%\ChatGPT, so it needs no elevation, and adds a Desktop
 shortcut, a Start Menu entry and an Add/Remove Programs entry with an
 uninstaller. Run it with /S for a silent install.

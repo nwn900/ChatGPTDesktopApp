@@ -18,20 +18,20 @@ use std::sync::mpsc::Sender;
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_PROCESS_FAILED_KIND, COREWEBVIEW2_PROCESS_FAILED_KIND_FRAME_RENDER_PROCESS_EXITED,
     COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED,
-    CreateCoreWebView2EnvironmentWithOptions, ICoreWebView2, ICoreWebView2Controller,
-    ICoreWebView2Environment, ICoreWebView2EnvironmentOptions,
+    CreateCoreWebView2EnvironmentWithOptions, ICoreWebView2, ICoreWebView2_4,
+    ICoreWebView2Controller, ICoreWebView2Environment, ICoreWebView2EnvironmentOptions,
 };
 use webview2_com::{
     AddScriptToExecuteOnDocumentCreatedCompletedHandler,
     CreateCoreWebView2ControllerCompletedHandler, CreateCoreWebView2EnvironmentCompletedHandler,
-    NavigationStartingEventHandler, NewWindowRequestedEventHandler, ProcessFailedEventHandler,
-    WebMessageReceivedEventHandler, take_pwstr,
+    DownloadStartingEventHandler, NavigationStartingEventHandler, NewWindowRequestedEventHandler,
+    ProcessFailedEventHandler, WebMessageReceivedEventHandler, take_pwstr,
 };
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, GetForegroundWindow, IsWindowVisible,
 };
-use windows::core::{HSTRING, PCWSTR, PWSTR};
+use windows::core::{HSTRING, Interface, PCWSTR, PWSTR};
 
 use crate::links::{ChatGptPolicy, LinkPolicy, Navigation, Popup};
 
@@ -302,6 +302,7 @@ fn create_controller(parent: HWND, environment: ICoreWebView2Environment, url: &
             install_process_handlers(&core);
             install_message_handler(&core);
             install_watcher(&core);
+            install_download_handler(&core);
             if let Err(error) = unsafe { controller.SetIsVisible(true) } {
                 log(&format!("set visible failed: {error:?}"));
             }
@@ -322,6 +323,81 @@ fn create_controller(parent: HWND, environment: ICoreWebView2Environment, url: &
     let immediate = unsafe { environment.CreateCoreWebView2Controller(parent, &handler) };
     if let Err(error) = immediate {
         fail(&format!("controller call: {error:?}"));
+    }
+}
+
+/// Ask where to save every download, starting in the folder last used.
+///
+/// WebView2 would otherwise drop the file into the Downloads folder without a
+/// word. The dialog is modal and runs on the UI thread, which is where the
+/// event arrives; the download waits for the handler to return either way.
+fn install_download_handler(core: &ICoreWebView2) {
+    let handler = DownloadStartingEventHandler::create(Box::new(|_sender, args| {
+        let Some(args) = args else {
+            return Ok(());
+        };
+        // The name WebView2 would have used, so the dialog starts with it.
+        let mut raw = PWSTR::null();
+        let suggested = if unsafe { args.ResultFilePath(&mut raw) }.is_ok() {
+            std::path::PathBuf::from(take_pwstr(raw))
+        } else {
+            std::path::PathBuf::new()
+        };
+        let file_name = suggested
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("download")
+            .to_string();
+        log(&format!("download starting: {file_name}"));
+
+        let mut dialog = rfd::FileDialog::new().set_file_name(&file_name);
+        if let Some(dir) = crate::settings::last_download_dir() {
+            dialog = dialog.set_directory(dir);
+        } else if let Some(parent) = suggested.parent() {
+            dialog = dialog.set_directory(parent);
+        }
+
+        let Some(path) = dialog.save_file() else {
+            // Cancelled: drop the download rather than saving it somewhere the
+            // user did not choose.
+            log("download: cancelled");
+            unsafe {
+                let _ = args.SetCancel(true);
+            }
+            return Ok(());
+        };
+        // The path itself is never logged.
+        log("download: saved");
+        if let Some(dir) = path.parent() {
+            if let Err(error) = crate::settings::set_last_download_dir(dir) {
+                log(&format!("could not remember the download folder: {error}"));
+            }
+        }
+        let text = path.to_string_lossy().to_string();
+        if let Err(error) = unsafe { args.SetResultFilePath(&HSTRING::from(text.as_str())) } {
+            log(&format!("download path rejected: {error:?}"));
+            unsafe {
+                let _ = args.SetCancel(true);
+            }
+            return Ok(());
+        }
+        // Handled: the app chose the path, so WebView2 must not also show its
+        // own download shelf.
+        unsafe {
+            let _ = args.SetHandled(true);
+        }
+        Ok(())
+    }));
+    // The download API arrived in WebView2 1.4; an older Runtime keeps its
+    // default behaviour rather than losing downloads entirely.
+    let Ok(core) = core.cast::<ICoreWebView2_4>() else {
+        log("downloads: runtime older than 1.4, using the default folder");
+        return;
+    };
+    let mut token = 0;
+    match unsafe { core.add_DownloadStarting(&handler, &mut token) } {
+        Ok(()) => log("download handler installed"),
+        Err(error) => log(&format!("add_DownloadStarting failed: {error:?}")),
     }
 }
 

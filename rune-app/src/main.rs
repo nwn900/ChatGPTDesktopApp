@@ -15,6 +15,7 @@
 
 mod autostart;
 mod links;
+mod settings;
 mod single_instance;
 mod webview;
 
